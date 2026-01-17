@@ -14,7 +14,7 @@ export default function Home() {
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title} accessibilityRole="header">ArtBeyondSight</Text>
+        <Text style={styles.title} accessibilityRole="header">ART</Text>
         <Text style={styles.subtitle}>Experience art and landmarks through music and narration</Text>
 
         <View style={styles.row}>
