@@ -2,7 +2,6 @@
 // This integrates with your existing backend pipeline
 
 import { analyzeArtwork } from "./navigator";
-import { generateMusic } from "./suno";
 
 export interface AnalyzeImageResult {
   imageUri: string;
@@ -22,19 +21,27 @@ export async function analyzeImage(
   mode: "museum" | "monuments" | "landscape",
 ): Promise<AnalyzeImageResult> {
   console.log(`🎯 Starting ${mode} analysis...`);
+  console.log(`   Image data length: ${imageDataUrl.length} chars`);
 
   try {
     if (mode === "museum") {
+      console.log("   Route: Museum mode");
       return await analyzeMuseumMode(imageDataUrl);
     } else if (mode === "monuments") {
+      console.log("   Route: Monuments mode");
       return await analyzeMonumentsMode(imageDataUrl);
     } else if (mode === "landscape") {
+      console.log("   Route: Landscape mode");
       return await analyzeLandscapeMode(imageDataUrl);
     } else {
       throw new Error(`Unsupported mode: ${mode}`);
     }
   } catch (error) {
     console.error(`❌ Analysis failed for ${mode} mode:`, error);
+    if (error instanceof Error) {
+      console.error(`   Error name: ${error.name}`);
+      console.error(`   Error message: ${error.message}`);
+    }
     throw error;
   }
 }
@@ -46,12 +53,17 @@ async function analyzeMuseumMode(
 
   try {
     // Step 1: Analyze artwork with Navigator API
+    console.log("   Calling analyzeArtwork...");
     const analysis = await analyzeArtwork(imageDataUrl, "museum");
+    console.log("   analyzeArtwork returned:", analysis);
 
     console.log("✅ Navigator analysis complete:", analysis.title);
 
-    // Step 2: Generate music with Suno (in parallel, optional)
+    // Step 2: Generate music with Suno (optional, skip for now to test)
     let audioUri: string | null = null;
+    console.log("⏭️ Skipping music generation for faster testing");
+    // TODO: Re-enable music generation after fixing core pipeline
+    /*
     try {
       console.log("🎵 Generating music with Suno...");
       const musicPrompt = `Create an ambient classical instrumental piece that evokes ${analysis.emotions.join(", ")} feelings, inspired by ${analysis.title}. The music should be contemplative and immersive.`;
@@ -72,6 +84,7 @@ async function analyzeMuseumMode(
       );
       // Continue without music - not critical
     }
+    */
 
     const result: AnalyzeImageResult = {
       imageUri: imageDataUrl,

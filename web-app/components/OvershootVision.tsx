@@ -125,7 +125,6 @@ export function OvershootVision({
 export function useOvershootVision() {
   const visionRef = useRef<any>(null);
   const [isInitialized, setIsInitialized] = useState(false);
-  const videoStreamRef = useRef<MediaStream | null>(null);
 
   const initialize = async (config: {
     apiKey: string;
@@ -280,32 +279,12 @@ Respond in JSON format: {"hasArtwork": boolean, "type": "museum"|"monuments"|"la
         await visionRef.current.start();
         console.log("✅ Overshoot stream started successfully");
         console.log("   Stream should now be processing frames...");
-
-        // Get camera stream from Overshoot
-        // The SDK creates its own MediaStream, we need to access it
-        setTimeout(() => {
-          try {
-            // Try to access the internal video element or stream
-            if (visionRef.current._videoElement) {
-              const stream = visionRef.current._videoElement.srcObject;
-              if (stream) {
-                videoStreamRef.current = stream;
-                console.log("   ✅ Retrieved video stream from Overshoot");
-              }
-            }
-          } catch (e) {
-            console.log("   ⚠️ Could not access Overshoot's video stream");
-          }
-        }, 100);
-
-        return videoStreamRef.current;
       } catch (error) {
         console.error("❌ Failed to start Overshoot:", error);
         throw error;
       }
     } else {
       console.error("❌ Cannot start: visionRef.current is null");
-      return null;
     }
   };
 
@@ -327,6 +306,5 @@ Respond in JSON format: {"hasArtwork": boolean, "type": "museum"|"monuments"|"la
     start,
     stop,
     isInitialized,
-    getVideoStream: () => videoStreamRef.current,
   };
 }

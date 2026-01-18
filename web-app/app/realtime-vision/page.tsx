@@ -39,62 +39,99 @@ export default function RealtimeVisionPage() {
     return canvas.toDataURL("image/jpeg", 0.8);
   };
 
-  const handleArtworkDetected = async (detection: {
+  const handleArtworkDetected = (detection: {
     type: "museum" | "monuments" | "landscape";
     confidence: number;
     description: string;
   }) => {
+    console.log("🎨 Artwork detected!", detection);
     const detectionKey = `${detection.type}-${detection.description.slice(0, 50)}`;
-    if (analyzingRef.current || lastDetectionRef.current === detectionKey) {
+
+    // Skip duplicate detections within 5 seconds
+    if (lastDetectionRef.current === detectionKey) {
       return;
     }
 
     lastDetectionRef.current = detectionKey;
-    analyzingRef.current = true;
+    setTimeout(() => {
+      lastDetectionRef.current = "";
+    }, 5000);
 
     const newDetection: Detection = {
       timestamp: new Date().toLocaleTimeString(),
       ...detection,
-      analyzing: true,
+      analyzing: false,
     };
 
     setDetections((prev) => [newDetection, ...prev.slice(0, 9)]);
+  };
+
+  const handleAnalyzeDetection = async (detection: Detection) => {
+    if (analyzingRef.current) {
+      return;
+    }
+
+    analyzingRef.current = true;
     setIsAnalyzing(true);
+    setDetections((prev) =>
+      prev.map((d) =>
+        d.timestamp === detection.timestamp ? { ...d, analyzing: true } : d,
+      ),
+    );
 
     try {
+      console.log("📸 Step 1: Capturing frame from video...");
       const imageDataUrl = captureFrame();
       if (!imageDataUrl) {
         throw new Error("Failed to capture frame");
       }
+      console.log("✅ Frame captured successfully");
 
+      // Stop Overshoot stream before heavy processing
+      console.log("⏸️ Pausing Overshoot stream during analysis...");
+      await stop();
+
+      console.log("🔍 Step 2: Starting AI analysis pipeline...");
       const analysis = await analyzeImage(imageDataUrl, detection.type);
+      console.log("✅ Analysis complete:", analysis.title);
 
-      const params = new URLSearchParams({
-        imageUri: imageDataUrl,
-        title: analysis.title,
-        artist: analysis.artist,
-        type: analysis.type,
-        description: analysis.description,
-        historicalPrompt: analysis.historicalPrompt || "",
-        immersivePrompt: analysis.immersivePrompt || "",
-        emotions: JSON.stringify(analysis.emotions),
-        audioUri: analysis.audioUri || "",
-        mode: detection.type,
-      });
+      console.log("🚀 Step 3: Navigating to results page...");
+      // Store data in sessionStorage to avoid HTTP 431 error (URL too large)
+      const resultId = `result-${Date.now()}`;
+      sessionStorage.setItem(
+        resultId,
+        JSON.stringify({
+          imageUri: imageDataUrl,
+          title: analysis.title,
+          artist: analysis.artist,
+          type: analysis.type,
+          description: analysis.description,
+          historicalPrompt: analysis.historicalPrompt || "",
+          immersivePrompt: analysis.immersivePrompt || "",
+          emotions: analysis.emotions,
+          audioUri: analysis.audioUri || "",
+          mode: detection.type,
+        }),
+      );
 
-      router.push(`/result?${params.toString()}`);
+      router.push(`/result?id=${resultId}`);
     } catch (error) {
-      console.error("Analysis failed:", error);
-      alert("Failed to analyze artwork. Please try again.");
+      console.error("❌ Analysis pipeline failed:", error);
+      if (error instanceof Error) {
+        console.error("   Error message:", error.message);
+        console.error("   Stack:", error.stack);
+      }
+      alert(
+        `Failed to analyze artwork: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
       setDetections((prev) =>
-        prev.map((d, i) => (i === 0 ? { ...d, analyzing: false } : d)),
+        prev.map((d) =>
+          d.timestamp === detection.timestamp ? { ...d, analyzing: false } : d,
+        ),
       );
     } finally {
       setIsAnalyzing(false);
       analyzingRef.current = false;
-      setTimeout(() => {
-        lastDetectionRef.current = "";
-      }, 5000);
     }
   };
 
@@ -104,9 +141,9 @@ export default function RealtimeVisionPage() {
     console.log("   API Key length:", apiKey?.length);
     console.log("   Is initialized:", isInitialized);
 
-    // First, manually start camera to display in video element
+    // Start our own camera stream for display
     try {
-      console.log("📹 Starting camera for display...");
+      console.log("📹 Requesting camera access for display...");
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: "environment",
@@ -116,7 +153,7 @@ export default function RealtimeVisionPage() {
       });
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        console.log("✅ Camera stream attached to video element");
+        console.log("✅ Camera display active");
       }
     } catch (error) {
       console.error("❌ Camera access failed:", error);
@@ -124,7 +161,7 @@ export default function RealtimeVisionPage() {
       return;
     }
 
-    // Initialize Overshoot (it will create its own internal stream for processing)
+    // Initialize Overshoot (it will create its own internal camera stream for processing)
     if (!isInitialized) {
       console.log(
         "🔧 Initializing Overshoot with API key:",
@@ -147,20 +184,21 @@ export default function RealtimeVisionPage() {
     console.log("▶️ Starting Overshoot vision...");
     await start();
     setIsActive(true);
-
-    // Note: We have 2 camera streams now:
-    // 1. Our display stream (in videoRef)
-    // 2. Overshoot's processing stream (internal)
-    // This is fine - both use the same camera
   };
   const handleStop = async () => {
+    console.log("🛑 Stop button clicked");
     await stop();
     setIsActive(false);
 
+    // Stop our display camera stream
     if (videoRef.current?.srcObject) {
       const stream = videoRef.current.srcObject as MediaStream;
-      stream.getTracks().forEach((track) => track.stop());
+      stream.getTracks().forEach((track) => {
+        console.log("   Stopping camera track:", track.label);
+        track.stop();
+      });
       videoRef.current.srcObject = null;
+      console.log("✅ Camera display stopped");
     }
   };
 
@@ -271,9 +309,9 @@ export default function RealtimeVisionPage() {
                 </h3>
                 <ul className="text-gray-300 text-xs space-y-1">
                   <li>• Point camera at artwork, monuments, or landscapes</li>
-                  <li>• AI automatically detects and identifies art type</li>
-                  <li>• Full analysis begins when artwork is detected</li>
-                  <li>• Results open automatically with complete details</li>
+                  <li>• AI automatically detects and lists items in sidebar</li>
+                  <li>• Click any detection to analyze and get full details</li>
+                  <li>• Results page opens with complete analysis</li>
                 </ul>
               </div>
             </div>
@@ -306,12 +344,19 @@ export default function RealtimeVisionPage() {
                   </div>
                 ) : (
                   detections.map((detection, idx) => (
-                    <div
+                    <button
                       key={idx}
-                      className={`bg-gray-900 rounded-lg p-3 border ${
+                      onClick={() =>
+                        !detection.analyzing &&
+                        handleAnalyzeDetection(detection)
+                      }
+                      disabled={detection.analyzing || isAnalyzing}
+                      className={`w-full bg-gray-900 rounded-lg p-3 border text-left transition-all ${
                         detection.analyzing
-                          ? "border-blue-500 animate-pulse"
-                          : "border-gray-700"
+                          ? "border-blue-500 animate-pulse cursor-wait"
+                          : isAnalyzing
+                            ? "border-gray-700 opacity-50 cursor-not-allowed"
+                            : "border-gray-700 hover:border-blue-500 hover:bg-gray-800 cursor-pointer"
                       }`}
                     >
                       <div className="flex items-start justify-between mb-1.5">
@@ -348,7 +393,7 @@ export default function RealtimeVisionPage() {
                           Analyzing...
                         </div>
                       )}
-                    </div>
+                    </button>
                   ))
                 )}
               </div>

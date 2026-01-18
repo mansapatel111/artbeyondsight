@@ -14,18 +14,27 @@ function ResultPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const imageUri = searchParams.get("imageUri") || "";
-  const title = searchParams.get("title") || "Untitled";
-  const artist = searchParams.get("artist") || "Unknown Artist";
-  const type = searchParams.get("type") || "";
-  const description = searchParams.get("description") || "";
-  const historicalPrompt = searchParams.get("historicalPrompt") || "";
-  const immersivePrompt = searchParams.get("immersivePrompt") || "";
-  const emotionsStr = searchParams.get("emotions") || "[]";
-  const audioUri = searchParams.get("audioUri") || "";
-  const mode = searchParams.get("mode") || "museum";
+  // Get data from sessionStorage instead of URL params to avoid HTTP 431 error
+  const resultId = searchParams.get("id");
+  const storedData = resultId ? sessionStorage.getItem(resultId) : null;
+  const data = storedData ? JSON.parse(storedData) : {};
 
-  const emotions = JSON.parse(emotionsStr) as string[];
+  const imageUri = data.imageUri || searchParams.get("imageUri") || "";
+  const title = data.title || searchParams.get("title") || "Untitled";
+  const artist = data.artist || searchParams.get("artist") || "Unknown Artist";
+  const type = data.type || searchParams.get("type") || "";
+  const description = data.description || searchParams.get("description") || "";
+  const historicalPrompt =
+    data.historicalPrompt || searchParams.get("historicalPrompt") || "";
+  const immersivePrompt =
+    data.immersivePrompt || searchParams.get("immersivePrompt") || "";
+  const emotions =
+    data.emotions ||
+    (searchParams.get("emotions")
+      ? JSON.parse(searchParams.get("emotions")!)
+      : []);
+  const audioUri = data.audioUri || searchParams.get("audioUri") || "";
+  const mode = data.mode || searchParams.get("mode") || "museum";
 
   const [isPlayingMusic, setIsPlayingMusic] = useState(false);
   const [isPlayingHistorical, setIsPlayingHistorical] = useState(false);
