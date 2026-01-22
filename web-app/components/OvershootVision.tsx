@@ -107,11 +107,10 @@ export function OvershootVision({
 
           <button
             onClick={isActive ? stopVision : startVision}
-            className={`px-6 py-2 rounded-lg font-semibold transition-colors ${
-              isActive
-                ? "bg-red-500 hover:bg-red-600 text-white"
-                : "bg-green-500 hover:bg-green-600 text-white"
-            }`}
+            className={`px-6 py-2 rounded-lg font-semibold transition-colors ${isActive
+              ? "bg-red-500 hover:bg-red-600 text-white"
+              : "bg-green-500 hover:bg-green-600 text-white"
+              }`}
           >
             {isActive ? "Stop" : "Start"} Vision
           </button>
@@ -133,19 +132,22 @@ export function useOvershootVision() {
       type: "museum" | "monuments" | "landscape";
       confidence: number;
       description: string;
+      title?: string;
     }) => void;
     onResult: (result: any) => void;
   }) => {
     try {
       const { RealtimeVision } = await import("@overshoot/sdk");
 
-      // Fixed prompt for artwork detection
+      // Fixed prompt for artwork detection with position and title
       const artDetectionPrompt = `Analyze this image and determine:
-1. Is there artwork visible? (painting, sculpture, monument, or landscape)
-2. What type: museum artwork (painting/sculpture), historical monument/architecture, or natural landscape
-3. Brief description of what you see
+    1. Is there artwork visible? (painting, sculpture, monument, or landscape)
+    2. What type: museum artwork (painting/sculpture), historical monument/architecture, or natural landscape
+    3. Artwork title/name if identifiable; empty string if unknown
+    4. Position of artwork in frame: "center" (well-framed), "left" (artwork on left side), "right" (artwork on right side), "partial" (partially visible), or "none" (no artwork visible)
+    5. Brief description of what you see
 
-Respond in JSON format: {"hasArtwork": boolean, "type": "museum"|"monuments"|"landscape", "confidence": 0-100, "description": "brief description"}`;
+    Respond in JSON format: {"hasArtwork": boolean, "type": "museum"|"monuments"|"landscape", "confidence": 0-100, "title": string, "position": "center"|"left"|"right"|"partial"|"none", "description": "brief description"}`;
 
       console.log("🔧 Initializing Overshoot SDK...");
       console.log(
@@ -180,9 +182,21 @@ Respond in JSON format: {"hasArtwork": boolean, "type": "museum"|"monuments"|"la
               enum: ["museum", "monuments", "landscape"],
             },
             confidence: { type: "number" },
+            title: { type: "string" },
+            position: {
+              type: "string",
+              enum: ["center", "left", "right", "partial", "none"],
+            },
             description: { type: "string" },
           },
-          required: ["hasArtwork", "type", "confidence", "description"],
+          required: [
+            "hasArtwork",
+            "type",
+            "confidence",
+            "title",
+            "position",
+            "description",
+          ],
         },
         onResult: (result: any) => {
           console.log("📥 Raw Overshoot response:", result);
@@ -199,12 +213,34 @@ Respond in JSON format: {"hasArtwork": boolean, "type": "museum"|"monuments"|"la
           try {
             const parsed = JSON.parse(result.result);
             console.log("✅ Parsed JSON result:", parsed);
+
+            // Log detection status
+            if (parsed.hasArtwork) {
+              console.log(`🎨 PAINTING DETECTED: Yes (${parsed.confidence}% confidence)`);
+              console.log(`📍 Position in frame: ${parsed.position}`);
+
+              // Provide directional guidance
+              if (parsed.position === "left") {
+                console.log("👈 GUIDANCE: Turn RIGHT to center the artwork");
+              } else if (parsed.position === "right") {
+                console.log("👉 GUIDANCE: Turn LEFT to center the artwork");
+              } else if (parsed.position === "partial") {
+                console.log("⚠️ GUIDANCE: Move back or adjust angle - artwork is partially visible");
+              } else if (parsed.position === "center") {
+                console.log("✅ GUIDANCE: Perfect! Artwork is centered");
+              }
+            } else {
+              console.log("❌ PAINTING DETECTED: No");
+              console.log("👀 GUIDANCE: Look around - no artwork in current frame");
+            }
+
             if (parsed.hasArtwork && parsed.confidence > 70) {
-              console.log("🎨 Artwork detected!", parsed);
+              console.log("🎨 Triggering artwork detection callback");
               config.onArtworkDetected({
                 type: parsed.type,
                 confidence: parsed.confidence,
                 description: parsed.description,
+                title: parsed.title?.trim() || undefined,
               });
             }
           } catch {
