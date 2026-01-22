@@ -1,8 +1,104 @@
 // Real-time image analysis using Navigator API and Suno
 // This integrates with your existing backend pipeline
 
-import { analyzeArtwork } from "./navigator";
+import { textToSpeech } from "./elevenlabs";
+import { analyzeArtwork, analyzeArtworkByName } from "./navigator";
 import { generateMusic } from "./suno";
+
+/**
+ * Announce artwork detection via TTS
+ */
+async function announceDetection(artworkName: string): Promise<void> {
+  try {
+    console.log("🔊 Announcing detection:", artworkName);
+    const message = `${artworkName} found. Please wait a few moments while we gather detailed information.`;
+    await textToSpeech(message);
+  } catch (error) {
+    console.error("Failed to announce detection:", error);
+    throw error;
+  }
+}
+
+export interface AnalyzeImageResult {
+  imageUri: string;
+  title: string;
+  artist: string;
+  type: string;
+  description: string;
+  historicalPrompt?: string;
+  immersivePrompt?: string;
+  emotions: string[];
+  audioUri: string | null;
+  analysisId?: string;
+}
+
+/**
+ * Detect artwork using Overshoot SDK (fast initial detection)
+ */
+async function detectArtworkWithOvershoot(
+  imageDataUrl: string,
+): Promise<string | null> {
+  try {
+    console.log("🔍 Detecting artwork with Overshoot...");
+
+    // Upload image to backend for Overshoot to process
+    const uploadResponse = await fetch(
+      "http://localhost:8000/api/upload-temp-image",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          image_base64: imageDataUrl,
+        }),
+      },
+    );
+
+    if (!uploadResponse.ok) {
+      console.warn("❌ Image upload for Overshoot failed");
+      return null;
+    }
+
+    const uploadData = await uploadResponse.json();
+    const imageUrl = uploadData.image_url;
+
+    // Call Overshoot detection API on backend
+    const detectionResponse = await fetch(
+      "http://localhost:8000/api/detect-artwork",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          image_url: imageUrl,
+        }),
+      },
+    );
+
+    if (!detectionResponse.ok) {
+      console.warn("⚠️ Overshoot detection not available, skipping...");
+      return null;
+    }
+
+    const detection = await detectionResponse.json();
+    console.log("✅ Overshoot detected:", detection);
+
+    // Extract artwork name from detection
+    if (detection.title && detection.title !== "") {
+      return detection.title;
+    }
+    if (detection.description) {
+      return detection.description;
+    }
+
+    return null;
+  } catch (error) {
+    console.warn("⚠️ Overshoot detection failed:", error);
+    return null;
+  }
+}
 
 export interface AnalyzeImageResult {
   imageUri: string;
@@ -24,7 +120,9 @@ export async function analyzeImage(
 ): Promise<AnalyzeImageResult> {
   console.log(`🎯 Starting ${mode} analysis...`);
   console.log(`   Image data length: ${imageDataUrl.length} chars`);
-  console.log(`   Overshoot description: ${overshootDescription}`);
+  console.log(
+    `   Overshoot real-time detection: ${overshootDescription || "none"}`,
+  );
 
   try {
     if (mode === "museum") {
@@ -53,19 +151,57 @@ async function analyzeMuseumMode(
   imageDataUrl: string,
   overshootDescription?: string,
 ): Promise<AnalyzeImageResult> {
-  console.log("🎨 Museum Mode: Starting Navigator AI analysis...");
+  console.log("🎨 Museum Mode: Starting analysis...");
 
   try {
-    // Step 1: Analyze artwork with Navigator API
-    console.log("   Calling analyzeArtwork...");
-    const analysis = await analyzeArtwork(
-      imageDataUrl,
-      "museum",
-      overshootDescription,
-    );
-    console.log("   analyzeArtwork returned:", analysis);
+    let analysis;
 
-    console.log("✅ Navigator analysis complete:", analysis.title);
+    // Prioritize real-time Overshoot detection from camera
+    if (overshootDescription && overshootDescription.trim() !== "") {
+      console.log(
+        "✅ Using real-time Overshoot detection:",
+        overshootDescription,
+      );
+
+      // Extract only the artwork name (before "—" or first sentence)
+      let artworkName = overshootDescription.split("—")[0].trim();
+      if (!artworkName) {
+        artworkName = overshootDescription.split(".")[0].trim();
+      }
+      console.log("📌 Extracted artwork name:", artworkName);
+
+      // Announce detection with TTS
+      try {
+        await announceDetection(artworkName);
+      } catch (ttsError) {
+        console.warn("⚠️ TTS announcement failed:", ttsError);
+      }
+
+      // Use fast text-based Navigator query (no vision processing needed!)
+      analysis = await analyzeArtworkByName(artworkName, "museum");
+      console.log("✅ Fast text-based Navigator analysis complete");
+    } else {
+      // Fallback: Try static image detection with Overshoot
+      console.log(
+        "⚠️ No real-time detection, trying static image detection...",
+      );
+      const detectedName = await detectArtworkWithOvershoot(imageDataUrl);
+
+      if (detectedName) {
+        console.log("✅ Static Overshoot detection:", detectedName);
+        analysis = await analyzeArtworkByName(detectedName, "museum");
+      } else {
+        console.log("⚠️ No detection available, using slow vision analysis");
+        // Last resort: Full vision analysis (slowest)
+        analysis = await analyzeArtwork(
+          imageDataUrl,
+          "museum",
+          overshootDescription,
+        );
+      }
+    }
+
+    console.log("✅ Analysis complete:", analysis.title);
 
     // Step 2: Generate music with Suno
     let audioUri: string | null = null;
@@ -129,14 +265,49 @@ async function analyzeMonumentsMode(
   imageDataUrl: string,
   overshootDescription?: string,
 ): Promise<AnalyzeImageResult> {
-  console.log("🏛️ Monuments Mode: Starting Navigator AI analysis...");
+  console.log("🏛️ Monuments Mode: Starting analysis...");
 
   try {
-    const analysis = await analyzeArtwork(
-      imageDataUrl,
-      "monuments",
-      overshootDescription,
-    );
+    let analysis;
+
+    // Prioritize real-time Overshoot detection
+    if (overshootDescription && overshootDescription.trim() !== "") {
+      console.log(
+        "✅ Using real-time Overshoot detection:",
+        overshootDescription,
+      );
+
+      // Extract only the monument name
+      let monumentName = overshootDescription.split("—")[0].trim();
+      if (!monumentName) {
+        monumentName = overshootDescription.split(".")[0].trim();
+      }
+      console.log("📌 Extracted monument name:", monumentName);
+
+      // Announce detection
+      try {
+        await announceDetection(monumentName);
+      } catch (ttsError) {
+        console.warn("⚠️ TTS announcement failed:", ttsError);
+      }
+
+      analysis = await analyzeArtworkByName(monumentName, "monuments");
+    } else {
+      // Fallback: Try static image detection
+      const detectedName = await detectArtworkWithOvershoot(imageDataUrl);
+
+      if (detectedName) {
+        console.log("✅ Static Overshoot detection:", detectedName);
+        analysis = await analyzeArtworkByName(detectedName, "monuments");
+      } else {
+        console.log("⚠️ No detection, using vision analysis");
+        analysis = await analyzeArtwork(
+          imageDataUrl,
+          "monuments",
+          overshootDescription,
+        );
+      }
+    }
 
     return {
       imageUri: imageDataUrl,
@@ -167,14 +338,49 @@ async function analyzeLandscapeMode(
   imageDataUrl: string,
   overshootDescription?: string,
 ): Promise<AnalyzeImageResult> {
-  console.log("🌄 Landscape Mode: Starting Navigator AI analysis...");
+  console.log("🌄 Landscape Mode: Starting analysis...");
 
   try {
-    const analysis = await analyzeArtwork(
-      imageDataUrl,
-      "landscape",
-      overshootDescription,
-    );
+    let analysis;
+
+    // Prioritize real-time Overshoot detection
+    if (overshootDescription && overshootDescription.trim() !== "") {
+      console.log(
+        "✅ Using real-time Overshoot detection:",
+        overshootDescription,
+      );
+
+      // Extract only the landscape name
+      let landscapeName = overshootDescription.split("—")[0].trim();
+      if (!landscapeName) {
+        landscapeName = overshootDescription.split(".")[0].trim();
+      }
+      console.log("📌 Extracted landscape name:", landscapeName);
+
+      // Announce detection
+      try {
+        await announceDetection(landscapeName);
+      } catch (ttsError) {
+        console.warn("⚠️ TTS announcement failed:", ttsError);
+      }
+
+      analysis = await analyzeArtworkByName(landscapeName, "landscape");
+    } else {
+      // Fallback: Try static image detection
+      const detectedName = await detectArtworkWithOvershoot(imageDataUrl);
+
+      if (detectedName) {
+        console.log("✅ Static Overshoot detection:", detectedName);
+        analysis = await analyzeArtworkByName(detectedName, "landscape");
+      } else {
+        console.log("⚠️ No detection, using vision analysis");
+        analysis = await analyzeArtwork(
+          imageDataUrl,
+          "landscape",
+          overshootDescription,
+        );
+      }
+    }
 
     return {
       imageUri: imageDataUrl,

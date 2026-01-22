@@ -127,9 +127,9 @@ Format your response as JSON with keys: title, artist (use "Nature" or location)
   }
 
   try {
-    console.log("⏱️ Sending request with 30s timeout...");
+    console.log("⏱️ Sending request with 90s timeout...");
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+    const timeoutId = setTimeout(() => controller.abort(), 90000); // 90 second timeout
 
     const response = await fetch(`${NAVIGATOR_BASE_URL}/chat/completions`, {
       method: "POST",
@@ -231,9 +231,149 @@ Format your response as JSON with keys: title, artist (use "Nature" or location)
     };
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      console.error("❌ Navigator API request timed out after 30 seconds");
+      console.error("❌ Navigator API request timed out after 90 seconds");
       throw new Error(
-        "Navigator API request timed out. The service may be slow or unavailable.",
+        "Navigator API request timed out. The vision model is taking too long to analyze this image. Please try again or try a different image.",
+      );
+    }
+    console.error("❌ Navigator API request failed:", error);
+    throw error;
+  }
+}
+
+/**
+ * Analyze artwork by name/description only (fast, no vision analysis)
+ * Uses text-based query instead of image analysis
+ */
+export async function analyzeArtworkByName(
+  artworkName: string,
+  mode: "museum" | "monuments" | "landscape",
+): Promise<NavigatorAnalysisResult> {
+  console.log("🔤 Navigator API: Text-based analysis...");
+  console.log("   Artwork name:", artworkName);
+  console.log("   Mode:", mode);
+
+  if (
+    !NAVIGATOR_API_KEY ||
+    NAVIGATOR_API_KEY === "your-navigator-api-key-here"
+  ) {
+    throw new Error("Navigator API key not configured in .env.local");
+  }
+
+  const prompts = {
+    museum: `Provide detailed information about "${artworkName}". Include:
+1. Full title of the artwork
+2. Artist name
+3. Year or period created
+4. Art type/medium
+5. Detailed description and visual characteristics
+6. Historical context and significance
+7. Style analysis and artistic techniques
+8. Emotional themes (3-5 emotions)
+
+Format your response as JSON with keys: title, artist, year, type, description, historicalContext, styleAnalysis, emotions (array)`,
+
+    monuments: `Provide detailed information about "${artworkName}". Include:
+1. Official name
+2. Architect or builder
+3. Year built
+4. Type of structure
+5. Physical description
+6. Historical significance
+7. Architectural style and features
+8. Cultural significance (3-5 themes)
+
+Format your response as JSON with keys: title, artist, year, type, description, historicalContext, styleAnalysis, emotions (array)`,
+
+    landscape: `Provide information about "${artworkName}" landscape. Include:
+1. Location name
+2. Geographic details
+3. Notable features
+4. Type of landscape
+5. Visual description
+6. Natural or historical significance
+7. Atmospheric qualities
+8. Emotional themes (3-5 emotions)
+
+Format your response as JSON with keys: title, artist (use location/region), year, type, description, historicalContext, styleAnalysis, emotions (array)`,
+  };
+
+  try {
+    console.log("⏱️ Sending text-only request with 120s timeout...");
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+    const response = await fetch(`${NAVIGATOR_BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${NAVIGATOR_API_KEY}`,
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model: "mistral-small-3.1",
+        messages: [
+          {
+            role: "user",
+            content: prompts[mode],
+          },
+        ],
+        max_tokens: 1000,
+      }),
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorDetails = await response.json().catch(() => response.text());
+      console.error("❌ Navigator API error:", errorDetails);
+      throw new Error(`Navigator API error (${response.status})`);
+    }
+
+    const data = await response.json();
+    const content = data.choices[0]?.message?.content;
+
+    if (!content) {
+      throw new Error("No response from Navigator API");
+    }
+
+    // Parse JSON response
+    try {
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        return {
+          title: parsed.title || artworkName,
+          artist: parsed.artist || "Unknown",
+          year: parsed.year,
+          type: parsed.type || "Artwork",
+          description: parsed.description || content,
+          historicalContext: parsed.historicalContext,
+          styleAnalysis: parsed.styleAnalysis,
+          emotions: parsed.emotions || ["contemplative"],
+        };
+      }
+    } catch (parseError) {
+      console.warn("Failed to parse JSON, using raw content");
+    }
+
+    // Fallback
+    return {
+      title: artworkName,
+      artist: "Unknown",
+      type:
+        mode === "museum"
+          ? "Artwork"
+          : mode === "monuments"
+            ? "Monument"
+            : "Landscape",
+      description: content,
+      emotions: ["contemplative", "inspiring"],
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(
+        "Navigator API request timed out after 120 seconds. The service may be experiencing high load.",
       );
     }
     console.error("❌ Navigator API request failed:", error);

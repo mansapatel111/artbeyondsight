@@ -3,6 +3,17 @@
 # dependencies
 node_modules/
 
+# Python virtual environment
+backend/venv/
+venv/
+env/
+*.pyc
+__pycache__/
+
+# Temporary images
+backend/temp_images/
+temp_images/
+
 # Expo
 .expo/
 dist/

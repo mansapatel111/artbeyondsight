@@ -227,7 +227,9 @@ async def search_analyses_by_name(image_name: str):
         return analyses
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to search analyses: {str(e)}")
+        print(f"MongoDB search error: {str(e)}")
+        # Return empty list if MongoDB is unavailable instead of failing
+        return []
 
 @app.put("/api/image-analysis/{analysis_id}", response_model=ImageAnalysisResponse)
 async def update_analysis(analysis_id: str, update_data: ImageAnalysisUpdate):
@@ -297,6 +299,94 @@ async def health_check():
     Simple health check endpoint
     """
     return {"status": "healthy", "timestamp": datetime.utcnow()}
+
+class DetectArtworkRequest(BaseModel):
+    image_url: str
+
+class DetectArtworkResponse(BaseModel):
+    title: str
+    description: str
+    confidence: float
+
+@app.post("/api/detect-artwork", response_model=DetectArtworkResponse)
+async def detect_artwork(request: DetectArtworkRequest):
+    """
+    Quick artwork detection using Overshoot API
+    Returns the artwork name/title for fast lookup
+    """
+    try:
+        import requests
+        
+        overshoot_api_key = os.getenv('NEXT_PUBLIC_OVERSHOOT_API_KEY')
+        if not overshoot_api_key:
+            raise HTTPException(status_code=500, detail="Overshoot API key not configured")
+        
+        # Call Overshoot API for quick detection
+        prompt = """Identify the artwork in this image. Respond with JSON:
+{
+  "title": "exact artwork name or empty string if unknown",
+  "description": "brief description of what you see",
+  "confidence": 0-100
+}"""
+        
+        response = requests.post(
+            "https://cluster1.overshoot.ai/api/v0.2/vision/analyze",
+            headers={
+                "Authorization": f"Bearer {overshoot_api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "image_url": request.image_url,
+                "prompt": prompt,
+                "model": "Qwen/Qwen3-VL-30B-A3B-Instruct",
+            },
+            timeout=15,
+        )
+        
+        if not response.ok:
+            print(f"Overshoot API error: {response.status_code}")
+            raise HTTPException(status_code=500, detail="Overshoot detection failed")
+        
+        result = response.json()
+        
+        # Try to parse the response
+        try:
+            import json
+            # Extract JSON from response
+            content = result.get("result", result.get("content", "{}"))
+            if isinstance(content, str):
+                # Try to find JSON in string
+                import re
+                json_match = re.search(r'\{[^}]+\}', content)
+                if json_match:
+                    data = json.loads(json_match.group(0))
+                else:
+                    data = {"title": "", "description": content, "confidence": 50}
+            else:
+                data = content
+            
+            return DetectArtworkResponse(
+                title=data.get("title", ""),
+                description=data.get("description", ""),
+                confidence=data.get("confidence", 50),
+            )
+        except Exception as parse_error:
+            print(f"Failed to parse Overshoot response: {parse_error}")
+            # Return empty title to fall back to vision analysis
+            return DetectArtworkResponse(
+                title="",
+                description=str(result),
+                confidence=0,
+            )
+            
+    except Exception as e:
+        print(f"Overshoot detection error: {str(e)}")
+        # Don't fail the request - return empty to trigger fallback
+        return DetectArtworkResponse(
+            title="",
+            description="Detection unavailable",
+            confidence=0,
+        )
 
 # MongoDB connection is lazy - will connect on first use
 print("✅ Backend API ready")
