@@ -62,7 +62,7 @@ function ResultPageContent() {
   // Listen for enrichment updates
   useEffect(() => {
     const handleEnrichment = (event: CustomEvent) => {
-      if (event.detail.resultId === resultId) {
+      if (resultId && event.detail.resultId === resultId) {
         console.log("🎨 Enrichment complete, reloading data...");
         const storedData = sessionStorage.getItem(resultId);
         if (storedData) {
