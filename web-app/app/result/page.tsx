@@ -73,15 +73,19 @@ function ResultPageContent() {
       }
     };
 
-    window.addEventListener(
-      "artwork-enriched",
-      handleEnrichment as EventListener,
-    );
-    return () => {
-      window.removeEventListener(
+    if (typeof window !== "undefined" && resultId) {
+      window.addEventListener(
         "artwork-enriched",
         handleEnrichment as EventListener,
       );
+    }
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener(
+          "artwork-enriched",
+          handleEnrichment as EventListener,
+        );
+      }
     };
   }, [resultId]);
 
