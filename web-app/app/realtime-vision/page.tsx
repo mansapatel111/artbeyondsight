@@ -57,6 +57,8 @@ export default function RealtimeVisionPage() {
     "Jefferson Market Courthouse",
     "Central Park Winter",
     "Bicycles",
+    "Japanese Vessel with Buddhist Motifs",
+    "Dancing Ganesha",
   ];
   const paintingIndexRef = useRef(0);
 
@@ -283,6 +285,7 @@ export default function RealtimeVisionPage() {
     if (cached.metadata?.audioUri) {
       const audioUri = cached.metadata.audioUri;
       console.log("🎵 Auto-playing music for:", cached.image_name);
+      const audioUri = cached.metadata.audioUri;
       // Use setTimeout to ensure state is updated first
       setTimeout(() => {
         if (audioRef.current) {

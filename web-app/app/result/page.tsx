@@ -1,9 +1,9 @@
 "use client";
 
 import {
-    speak as elevenLabsSpeak,
-    fallbackSpeak,
-    VOICES,
+  speak as elevenLabsSpeak,
+  fallbackSpeak,
+  VOICES,
 } from "@/lib/elevenlabs";
 import { FileText, Home, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import Image from "next/image";
@@ -287,19 +287,6 @@ function ResultPageContent() {
           <h2 className="text-4xl font-bold text-white mb-2">{title}</h2>
           <p className="text-xl text-gray-300 mb-1">{artist}</p>
           <p className="text-gray-400">{type}</p>
-
-          {emotions.length > 0 && (
-            <div className="flex flex-wrap gap-2 justify-center mt-4">
-              {emotions.map((emotion, index) => (
-                <span
-                  key={index}
-                  className="px-3 py-1 rounded-full bg-gray-700 text-gray-200 text-sm"
-                >
-                  {emotion}
-                </span>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* Music Player */}
