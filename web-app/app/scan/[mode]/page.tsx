@@ -1,7 +1,5 @@
 "use client";
 
-import { analyzeImage } from "@/lib/analyzeImage";
-import { ArtBeyondSightAPI } from "@/lib/api";
 import { Camera, Home, Sparkles, Upload } from "lucide-react";
 import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
@@ -101,79 +99,18 @@ export default function ScanPage() {
 
     try {
       setIsProcessing(true);
+      setProgressMessage(
+        "This feature has been disabled. Please use Real-Time Detection instead.",
+      );
 
-      if (mode === "museum") {
-        const steps = [
-          "Converting image...",
-          "Getting painting metadata...",
-          "Analyzing historical context...",
-          "Creating immersive description...",
-          "Generating music, this may take 1 to 2 minutes...",
-        ];
+      await new Promise((resolve) => setTimeout(resolve, 2000));
 
-        for (const step of steps) {
-          setProgressMessage(step);
-          await new Promise((resolve) => setTimeout(resolve, 800));
-        }
-      } else {
-        setProgressMessage("Analyzing image...");
-      }
-
-      console.log("📸 Starting image analysis...");
-      const result = await analyzeImage(imagePreview, mode);
-      console.log("✅ Analysis complete:", result);
-
-      // Save to database
-      console.log("💾 Saving to database...");
-      try {
-        const savedAnalysis = await ArtBeyondSightAPI.createAnalysis({
-          image_name: result.title,
-          analysis_type: mode,
-          descriptions: [
-            result.historicalPrompt || result.description,
-            result.immersivePrompt || "",
-          ].filter(Boolean),
-          metadata: {
-            imageUri: imagePreview.substring(0, 100), // Truncate for metadata
-            artist: result.artist,
-            genre: result.type,
-            historicalPrompt: result.historicalPrompt,
-            immersivePrompt: result.immersivePrompt,
-            emotions: result.emotions,
-            audioUri: result.audioUri,
-          },
-          image_base64: imagePreview,
-        });
-        console.log("✅ Saved to database:", savedAnalysis.id);
-      } catch (dbError) {
-        console.error("❌ Database save failed:", dbError);
-        if (dbError instanceof Error) {
-          console.error("Error message:", dbError.message);
-        }
-        // Continue anyway - we still have the analysis result
-      }
-
-      setProgressMessage("Analysis complete!");
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      // Navigate to results with data
-      const queryParams = new URLSearchParams({
-        imageUri: imagePreview,
-        title: result.title,
-        artist: result.artist,
-        type: result.type,
-        description: result.description,
-        historicalPrompt: result.historicalPrompt || "",
-        immersivePrompt: result.immersivePrompt || "",
-        emotions: JSON.stringify(result.emotions),
-        audioUri: result.audioUri || "",
-        mode,
-      });
-
-      router.push(`/result?${queryParams.toString()}`);
+      alert(
+        "Static image analysis has been disabled. Please use the Real-Time Detection feature to scan artwork from the database.",
+      );
     } catch (error) {
-      console.error("Analysis error:", error);
-      alert("Failed to analyze image. Please try again.");
+      console.error("Error:", error);
+      alert("Please use Real-Time Detection instead.");
     } finally {
       setIsProcessing(false);
       setProgressMessage("");

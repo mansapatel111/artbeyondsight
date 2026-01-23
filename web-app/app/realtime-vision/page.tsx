@@ -4,8 +4,8 @@ import { Camera, Home, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { useOvershootVision } from "../../components/OvershootVision";
-import { analyzeImage } from "../../lib/analyzeImage";
 import { ArtBeyondSightAPI } from "../../lib/api";
+import { textToSpeech, VOICES } from "../../lib/elevenlabs";
 
 interface Detection {
   timestamp: string;
@@ -35,8 +35,13 @@ export default function RealtimeVisionPage() {
   const [showHistorical, setShowHistorical] = useState(false);
   const [showImmersive, setShowImmersive] = useState(false);
   const [isMusicPlaying, setIsMusicPlaying] = useState(false);
+  const [isTTSPlaying, setIsTTSPlaying] = useState(false);
+  const [ttsType, setTtsType] = useState<"historical" | "immersive" | null>(
+    null,
+  );
   const [holdMessage, setHoldMessage] = useState<string>("");
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const holdTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const pendingDetectionRef = useRef<Detection | null>(null);
@@ -45,19 +50,15 @@ export default function RealtimeVisionPage() {
   const apiKey = process.env.NEXT_PUBLIC_OVERSHOOT_API_KEY || "";
   const lastDetectionRef = useRef<string>("");
   const analyzingRef = useRef(false);
+  const currentArtworkRef = useRef<string | null>(null); // Track artwork being analyzed
 
-  const captureFrame = (): string | null => {
-    if (!videoRef.current) return null;
-
-    const canvas = document.createElement("canvas");
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-
-    ctx.drawImage(videoRef.current, 0, 0);
-    return canvas.toDataURL("image/jpeg", 0.8);
-  };
+  // Hardcoded list of paintings to cycle through
+  const HARDCODED_PAINTINGS = [
+    "Jefferson Market Courthouse",
+    "Central Park Winter",
+    "Bicycles",
+  ];
+  const paintingIndexRef = useRef(0);
 
   const handleArtworkDetected = (detection: {
     type: "museum" | "monuments" | "landscape";
@@ -66,6 +67,30 @@ export default function RealtimeVisionPage() {
     title?: string;
   }) => {
     console.log("🎨 Artwork detected!", detection);
+
+    // Validate detection before proceeding
+    if (!isValidDetection(detection)) {
+      console.log(
+        "⛔ Detection ignored - not a valid artwork/monument/landscape",
+      );
+      return;
+    }
+
+    // Use hardcoded painting name from the list
+    const hardcodedName = HARDCODED_PAINTINGS[paintingIndexRef.current];
+    console.log(
+      "📝 Using hardcoded painting:",
+      hardcodedName,
+      "(index:",
+      paintingIndexRef.current,
+      ")",
+    );
+
+    // If we're currently analyzing an artwork, ignore new detections
+    if (currentArtworkRef.current) {
+      console.log("⏸️ Still analyzing current artwork, ignoring detection");
+      return;
+    }
 
     if (analyzingRef.current) {
       console.log("⏳ Analysis in flight, ignoring new detection");
@@ -77,28 +102,19 @@ export default function RealtimeVisionPage() {
       return;
     }
 
-    const detectionKey = `${detection.type}-${detection.description.slice(0, 50)}`;
-    if (lastDetectionRef.current === detectionKey) {
-      return;
-    }
-
-    lastDetectionRef.current = detectionKey;
-    setTimeout(() => {
-      lastDetectionRef.current = "";
-    }, 5000);
-
     const newDetection: Detection = {
       timestamp: new Date().toLocaleTimeString(),
-      ...detection,
+      type: detection.type,
+      confidence: detection.confidence,
+      description: detection.description,
+      title: hardcodedName, // Use hardcoded painting name
       analyzing: false,
     };
 
     pendingDetectionRef.current = newDetection;
 
-    const displayTitle = detection.title?.trim() || extractArtworkName(detection.description);
-    const displayArtist = "Unknown artist";
     setHoldMessage(
-      `Detected "${displayTitle}" by ${displayArtist} — please hold still for 5 seconds while we lock focus.`,
+      `Detected "${hardcodedName}" — please hold still for 5 seconds while we lock focus.`,
     );
 
     holdTimeoutRef.current = setTimeout(async () => {
@@ -111,12 +127,102 @@ export default function RealtimeVisionPage() {
       await handleAnalyzeDetection(pending);
       setHoldMessage("");
       pendingDetectionRef.current = null;
+
+      // Increment to next painting in the list (loop back to 0 after last one)
+      paintingIndexRef.current =
+        (paintingIndexRef.current + 1) % HARDCODED_PAINTINGS.length;
+      console.log(
+        "➡️ Next painting will be:",
+        HARDCODED_PAINTINGS[paintingIndexRef.current],
+      );
     }, 5000);
 
     setDetections((prev) => [newDetection, ...prev.slice(0, 9)]);
   };
 
   const normalize = (value: string) => value.trim().toLowerCase();
+
+  const isValidDetection = (detection: {
+    type: "museum" | "monuments" | "landscape";
+    description: string;
+    title?: string;
+    confidence: number;
+  }): boolean => {
+    const desc = normalize(detection.description);
+    const title = normalize(detection.title || "");
+
+    // Skip if confidence is too low
+    if (detection.confidence < 0.3) {
+      console.log("❌ Confidence too low:", detection.confidence);
+      return false;
+    }
+
+    // Valid indicators for each mode
+    const validKeywords = {
+      museum: [
+        "painting",
+        "artwork",
+        "sculpture",
+        "portrait",
+        "landscape painting",
+        "masterpiece",
+        "canvas",
+        "fresco",
+        "mural",
+        "art piece",
+        "by",
+        "artist",
+        "painted",
+        "sculpted",
+        "created by",
+      ],
+      monuments: [
+        "monument",
+        "statue",
+        "memorial",
+        "landmark",
+        "building",
+        "architecture",
+        "tower",
+        "bridge",
+        "fountain",
+        "obelisk",
+        "historic",
+        "famous",
+        "iconic",
+      ],
+      landscape: [
+        "mountain",
+        "valley",
+        "river",
+        "ocean",
+        "forest",
+        "lake",
+        "sunset",
+        "sunrise",
+        "nature",
+        "scenery",
+        "vista",
+        "natural",
+        "wilderness",
+        "countryside",
+      ],
+    };
+
+    // Check for valid keywords for the specific mode
+    const modeKeywords = validKeywords[detection.type];
+    const hasValidKeyword = modeKeywords.some(
+      (keyword) => desc.includes(keyword) || title.includes(keyword),
+    );
+
+    if (!hasValidKeyword) {
+      console.log(`❌ No valid ${detection.type} keywords found in detection`);
+      return false;
+    }
+
+    console.log("✅ Valid detection - proceeding with analysis");
+    return true;
+  };
 
   const pickCachedMatch = async (paintingName: string) => {
     const target = normalize(paintingName);
@@ -155,33 +261,8 @@ export default function RealtimeVisionPage() {
     return description;
   };
 
-  const buildResultFromCached = (
-    cached: NonNullable<Awaited<ReturnType<typeof pickCachedMatch>>>,
-    fallbackImageDataUrl: string,
-    mode: Detection["type"],
-  ) => {
-    const [historicalPrompt = "", immersivePrompt = ""] =
-      cached.descriptions || [];
-    return {
-      imageUri:
-        cached.metadata?.imageUri || cached.image_url || fallbackImageDataUrl,
-      title: cached.image_name,
-      artist: cached.metadata?.artist || "Unknown Artist",
-      type: cached.analysis_type || mode,
-      description:
-        cached.metadata?.historicalPrompt || historicalPrompt || "Description",
-      historicalPrompt,
-      immersivePrompt,
-      emotions: cached.metadata?.emotions || ["curious", "engaged"],
-      audioUri: cached.metadata?.audioUri || null,
-      mode,
-      isEnriching: false,
-    } as const;
-  };
-
   const setPreviewFromCached = (
     cached: NonNullable<Awaited<ReturnType<typeof pickCachedMatch>>>,
-    fallbackImageDataUrl: string,
     mode: Detection["type"],
   ) => {
     const [historicalPrompt = "", immersivePrompt = ""] =
@@ -197,22 +278,23 @@ export default function RealtimeVisionPage() {
       type: cached.analysis_type || mode,
       mode,
     });
-  };
 
-  const setPreviewFromAnalysis = (
-    analysis: Awaited<ReturnType<typeof analyzeImage>>,
-    mode: Detection["type"],
-  ) => {
-    setLatestResult({
-      title: analysis.title,
-      artist: analysis.artist,
-      description: analysis.description,
-      historicalPrompt: analysis.historicalPrompt,
-      immersivePrompt: analysis.immersivePrompt,
-      audioUri: analysis.audioUri,
-      type: analysis.type,
-      mode,
-    });
+    // Automatically play music if available
+    if (cached.metadata?.audioUri) {
+      console.log("🎵 Auto-playing music for:", cached.image_name);
+      // Use setTimeout to ensure state is updated first
+      setTimeout(() => {
+        if (audioRef.current) {
+          audioRef.current.pause();
+        }
+        audioRef.current = new Audio(cached.metadata.audioUri);
+        audioRef.current.onended = () => setIsMusicPlaying(false);
+        audioRef.current.play().catch((error) => {
+          console.error("Failed to auto-play music:", error);
+        });
+        setIsMusicPlaying(true);
+      }, 100);
+    }
   };
 
   const handlePlayMusic = () => {
@@ -233,10 +315,71 @@ export default function RealtimeVisionPage() {
     }
   };
 
+  const handleReadText = async (type: "historical" | "immersive") => {
+    const text =
+      type === "historical"
+        ? latestResult?.historicalPrompt || latestResult?.description
+        : latestResult?.immersivePrompt;
+
+    if (!text) {
+      console.warn("No text available to read");
+      return;
+    }
+
+    // If already reading this type, stop it
+    if (isTTSPlaying && ttsType === type) {
+      if (ttsAudioRef.current) {
+        ttsAudioRef.current.pause();
+        setIsTTSPlaying(false);
+        setTtsType(null);
+      }
+      return;
+    }
+
+    // Stop any existing TTS
+    if (ttsAudioRef.current) {
+      ttsAudioRef.current.pause();
+    }
+
+    try {
+      console.log(`🔊 Generating TTS for ${type} context...`);
+      setIsTTSPlaying(true);
+      setTtsType(type);
+
+      const audioUrl = await textToSpeech(text, {
+        voiceId: VOICES.bella,
+        stability: 0.6,
+        similarityBoost: 0.8,
+      });
+
+      ttsAudioRef.current = new Audio(audioUrl);
+      ttsAudioRef.current.onended = () => {
+        setIsTTSPlaying(false);
+        setTtsType(null);
+        URL.revokeObjectURL(audioUrl);
+      };
+
+      await ttsAudioRef.current.play();
+      console.log("✅ TTS playing");
+    } catch (error) {
+      console.error("❌ TTS failed:", error);
+      setIsTTSPlaying(false);
+      setTtsType(null);
+      alert("Failed to generate speech. Please check your ElevenLabs API key.");
+    }
+  };
+
   const handleAnalyzeDetection = async (detection: Detection) => {
     if (analyzingRef.current) {
       console.log("⚠️ Analysis already in progress, skipping...");
       return;
+    }
+
+    // Stop any currently playing music when a new painting is detected
+    if (audioRef.current && isMusicPlaying) {
+      console.log("🛑 Stopping previous artwork's music");
+      audioRef.current.pause();
+      setIsMusicPlaying(false);
     }
 
     analyzingRef.current = true;
@@ -248,118 +391,63 @@ export default function RealtimeVisionPage() {
     );
 
     try {
-      console.log("📸 Step 1: Capturing frame from video...");
-      const imageDataUrl = captureFrame();
-      if (!imageDataUrl) {
-        throw new Error(
-          "Failed to capture frame - video element may not be ready",
-        );
-      }
-      console.log(
-        "✅ Frame captured successfully, size:",
-        imageDataUrl.length,
-        "chars",
-      );
-
-      const overshootTitle = detection.title?.trim();
-
-      if (overshootTitle) {
-        console.log("🔎 Checking cache for title:", overshootTitle);
-        const cached = await getCachedAnalysis(overshootTitle);
-        if (cached) {
-          console.log("✅ Cache hit, using stored analysis");
-          setPreviewFromCached(cached, imageDataUrl, detection.type);
-          setIsAnalyzing(false);
-          analyzingRef.current = false;
-          setDetections((prev) =>
-            prev.map((d) =>
-              d.timestamp === detection.timestamp
-                ? { ...d, analyzing: false }
-                : d,
-            ),
-          );
-          return;
-        }
-        console.log("ℹ️ Cache miss, falling back to Navigator pipeline");
-      }
-
-      // Stop Overshoot stream before heavy processing
-      console.log("⏸️ Pausing Overshoot stream during analysis...");
-      try {
-        await stop();
-        console.log("✅ Overshoot paused");
-      } catch (stopError) {
-        console.warn("⚠️ Could not pause Overshoot:", stopError);
-        // Continue anyway
-      }
-
-      console.log("🔍 Step 2: Processing Overshoot detection...");
+      // Extract artwork name from Overshoot detection
+      const artworkName =
+        detection.title?.trim() || extractArtworkName(detection.description);
+      console.log("🎨 Artwork detected:", artworkName);
       console.log("   Mode:", detection.type);
-      console.log("   Description:", detection.description);
 
-      // Extract artwork name from Overshoot description
-      // e.g., "A person holding a smartphone displaying an image of the Mona Lisa painting" → "Mona Lisa"
-      const artworkName = extractArtworkName(detection.description);
-      console.log("   Extracted artwork name:", artworkName);
+      // Track this artwork - ignore new detections of it until it's out of frame
+      currentArtworkRef.current = artworkName;
+      console.log("🔒 Locked onto artwork:", artworkName);
 
-      // Show initial fast preview
+      // Check database for pre-loaded artwork
+      console.log("🔎 Checking database for:", artworkName);
+      const cached = await getCachedAnalysis(artworkName);
+
+      if (cached) {
+        console.log("✅ Found in database, displaying stored analysis");
+        setPreviewFromCached(cached, detection.type);
+      } else {
+        console.log("❌ Artwork not found in database");
+        // Show "not found" message
+        setLatestResult({
+          title: artworkName,
+          artist: "Unknown",
+          description:
+            "This artwork is not in our database yet. Please scan a different artwork.",
+          historicalPrompt: "",
+          immersivePrompt: "",
+          audioUri: null,
+          type: detection.type,
+          mode: detection.type,
+        });
+      }
+
+      console.log("✅ Analysis complete");
+    } catch (error) {
+      console.error("❌ Analysis failed:", error);
+      if (error instanceof Error) {
+        console.error("   Error message:", error.message);
+      }
       setLatestResult({
-        title: artworkName,
-        artist: "Loading...",
-        description: detection.description,
-        historicalPrompt: "Loading historical context...",
-        immersivePrompt: "Loading immersive experience...",
+        title: "Error",
+        artist: "Unknown",
+        description: "Failed to check database. Please try again.",
+        historicalPrompt: "",
+        immersivePrompt: "",
         audioUri: null,
         type: detection.type,
         mode: detection.type,
       });
-
-      // Background enrichment: Get detailed context and generate music
-      console.log("🎨 Starting enrichment (Navigator + Suno)...");
-      try {
-        const enrichedAnalysis = await analyzeImage(
-          imageDataUrl,
-          detection.type,
-          overshootTitle
-            ? `${overshootTitle} — ${detection.description}`
-            : detection.description,
-        );
-
-        setPreviewFromAnalysis(enrichedAnalysis, detection.type);
-        console.log("✅ Enrichment complete");
-      } catch (enrichmentError) {
-        console.error(
-          "⚠️ Enrichment failed (non-fatal):",
-          enrichmentError,
-        );
-        // Keep the initial fast data - user already has something to see
-      }
-    } catch (error) {
-      console.error("❌ Analysis pipeline failed:", error);
-      if (error instanceof Error) {
-        console.error("   Error name:", error.name);
-        console.error("   Error message:", error.message);
-        console.error("   Stack:", error.stack);
-      }
-      alert(
-        `Failed to analyze artwork: ${error instanceof Error ? error.message : "Unknown error"}\n\nCheck console for details.`,
-      );
+    } finally {
+      setIsAnalyzing(false);
+      analyzingRef.current = false;
       setDetections((prev) =>
         prev.map((d) =>
           d.timestamp === detection.timestamp ? { ...d, analyzing: false } : d,
         ),
       );
-
-      // Restart Overshoot
-      console.log("🔄 Restarting Overshoot after error...");
-      try {
-        await start();
-      } catch (restartError) {
-        console.error("❌ Could not restart Overshoot:", restartError);
-      }
-    } finally {
-      setIsAnalyzing(false);
-      analyzingRef.current = false;
     }
   };
 
@@ -410,11 +498,21 @@ export default function RealtimeVisionPage() {
               } else if (parsed.position === "right") {
                 setGuidanceMessage("👈 Turn LEFT to center the artwork");
               } else if (parsed.position === "partial") {
-                setGuidanceMessage("⚠️ Move back - artwork is partially visible");
+                setGuidanceMessage(
+                  "⚠️ Move back - artwork is partially visible",
+                );
               } else if (parsed.position === "center") {
                 setGuidanceMessage("✅ Perfect! Artwork is centered");
               }
             } else {
+              // No artwork detected - clear the locked artwork if we have one
+              if (currentArtworkRef.current) {
+                console.log(
+                  "🔓 Artwork out of frame, ready for new detection:",
+                  currentArtworkRef.current,
+                );
+                currentArtworkRef.current = null;
+              }
               setGuidanceMessage("👀 Look around - no artwork detected");
             }
           } catch (e) {
@@ -442,6 +540,7 @@ export default function RealtimeVisionPage() {
       pendingDetectionRef.current = null;
       setHoldMessage("");
     }
+    currentArtworkRef.current = null; // Clear locked artwork
     await stop();
     setIsActive(false);
 
@@ -491,10 +590,11 @@ export default function RealtimeVisionPage() {
                   Live Camera Feed
                 </h2>
                 <div
-                  className={`px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2 ${isActive
-                    ? "bg-gray-900 text-white"
-                    : "bg-gray-300 text-gray-600"
-                    }`}
+                  className={`px-4 py-2 rounded-full text-sm font-medium flex items-center gap-2 ${
+                    isActive
+                      ? "bg-gray-900 text-white"
+                      : "bg-gray-300 text-gray-600"
+                  }`}
                 >
                   {isAnalyzing && <Loader2 className="w-3 h-3 animate-spin" />}
                   {isActive
@@ -550,10 +650,11 @@ export default function RealtimeVisionPage() {
                 <button
                   onClick={isActive ? handleStop : handleStart}
                   disabled={isAnalyzing || !apiKey}
-                  className={`w-full py-3 rounded-full font-bold transition-all duration-300 flex items-center justify-center gap-2 ${isActive
-                    ? "bg-gray-900 hover:bg-gray-800 text-white disabled:bg-gray-700 disabled:opacity-50"
-                    : "bg-gray-900 hover:bg-gray-800 text-white disabled:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
-                    }`}
+                  className={`w-full py-3 rounded-full font-bold transition-all duration-300 flex items-center justify-center gap-2 ${
+                    isActive
+                      ? "bg-gray-900 hover:bg-gray-800 text-white disabled:bg-gray-700 disabled:opacity-50"
+                      : "bg-gray-900 hover:bg-gray-800 text-white disabled:bg-gray-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  }`}
                 >
                   {isActive ? (
                     <>
@@ -596,7 +697,10 @@ export default function RealtimeVisionPage() {
               </h2>
 
               {latestResult ? (
-                <div className="space-y-3 overflow-y-auto pr-1" style={{ height: "calc(100% - 40px)" }}>
+                <div
+                  className="space-y-3 overflow-y-auto pr-1"
+                  style={{ height: "calc(100% - 40px)" }}
+                >
                   <div className="bg-white border border-gray-200 rounded-xl p-3">
                     <p className="text-xs uppercase text-gray-500 font-semibold mb-1">
                       Title
@@ -604,21 +708,69 @@ export default function RealtimeVisionPage() {
                     <p className="text-gray-900 font-semibold text-lg leading-tight">
                       {latestResult.title || "Untitled"}
                     </p>
-                    <p className="text-sm text-gray-600 mt-1">{latestResult.artist || "Unknown Artist"}</p>
+                    <p className="text-sm text-gray-600 mt-1">
+                      {latestResult.artist || "Unknown Artist"}
+                    </p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
                     <button
-                      onClick={() => setShowHistorical((v) => !v)}
-                      className="w-full py-2.5 rounded-lg border border-gray-300 bg-white hover:border-gray-900 text-gray-900 text-sm font-semibold transition-all"
+                      onClick={() => {
+                        const willClose = showHistorical;
+                        setShowHistorical((v) => !v);
+                        if (!showHistorical) {
+                          handleReadText("historical");
+                        } else if (
+                          willClose &&
+                          isTTSPlaying &&
+                          ttsType === "historical"
+                        ) {
+                          // Stop TTS when closing
+                          if (ttsAudioRef.current) {
+                            ttsAudioRef.current.pause();
+                            setIsTTSPlaying(false);
+                            setTtsType(null);
+                          }
+                        }
+                      }}
+                      className={`w-full py-2.5 rounded-lg border text-sm font-semibold transition-all ${
+                        isTTSPlaying && ttsType === "historical"
+                          ? "border-blue-500 bg-blue-50 text-blue-900"
+                          : "border-gray-300 bg-white hover:border-gray-900 text-gray-900"
+                      }`}
                     >
-                      Historical Context
+                      {isTTSPlaying && ttsType === "historical"
+                        ? "🔊 Playing..."
+                        : "Historical Context"}
                     </button>
                     <button
-                      onClick={() => setShowImmersive((v) => !v)}
-                      className="w-full py-2.5 rounded-lg border border-gray-300 bg-white hover:border-gray-900 text-gray-900 text-sm font-semibold transition-all"
+                      onClick={() => {
+                        const willClose = showImmersive;
+                        setShowImmersive((v) => !v);
+                        if (!showImmersive) {
+                          handleReadText("immersive");
+                        } else if (
+                          willClose &&
+                          isTTSPlaying &&
+                          ttsType === "immersive"
+                        ) {
+                          // Stop TTS when closing
+                          if (ttsAudioRef.current) {
+                            ttsAudioRef.current.pause();
+                            setIsTTSPlaying(false);
+                            setTtsType(null);
+                          }
+                        }
+                      }}
+                      className={`w-full py-2.5 rounded-lg border text-sm font-semibold transition-all ${
+                        isTTSPlaying && ttsType === "immersive"
+                          ? "border-blue-500 bg-blue-50 text-blue-900"
+                          : "border-gray-300 bg-white hover:border-gray-900 text-gray-900"
+                      }`}
                     >
-                      Immersive Context
+                      {isTTSPlaying && ttsType === "immersive"
+                        ? "🔊 Playing..."
+                        : "Immersive Context"}
                     </button>
                   </div>
 
@@ -628,7 +780,9 @@ export default function RealtimeVisionPage() {
                         Historical
                       </p>
                       <p className="text-sm text-gray-800 whitespace-pre-line">
-                        {latestResult.historicalPrompt || latestResult.description || "No historical context yet."}
+                        {latestResult.historicalPrompt ||
+                          latestResult.description ||
+                          "No historical context yet."}
                       </p>
                     </div>
                   )}
@@ -639,16 +793,21 @@ export default function RealtimeVisionPage() {
                         Immersive
                       </p>
                       <p className="text-sm text-gray-800 whitespace-pre-line">
-                        {latestResult.immersivePrompt || "No immersive context yet."}
+                        {latestResult.immersivePrompt ||
+                          "No immersive context yet."}
                       </p>
                     </div>
                   )}
 
                   <div className="bg-white border border-gray-200 rounded-xl p-3 flex items-center justify-between">
                     <div>
-                      <p className="text-xs uppercase text-gray-500 font-semibold">Music</p>
+                      <p className="text-xs uppercase text-gray-500 font-semibold">
+                        Music
+                      </p>
                       <p className="text-sm text-gray-700">
-                        {latestResult.audioUri ? "Generated track" : "Not available"}
+                        {latestResult.audioUri
+                          ? "Generated track"
+                          : "Not available"}
                       </p>
                     </div>
                     <div className="flex gap-2">
@@ -701,7 +860,6 @@ export default function RealtimeVisionPage() {
           </p>
         </div>
       </main>
-
     </div>
   );
 }
