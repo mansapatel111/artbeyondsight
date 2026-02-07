@@ -1,6 +1,14 @@
-# Welcome to your Expo app 👋
+## 🎨 Art Beyond Sight - Multimodal AI Accessibility Platform: Repo
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Web App (Harn Museum of Art, Florida): https://youtu.be/sVN4-ctr4sM
+
+Mobile App (Carnegie Museum of Art, Pittsburgh): https://youtu.be/ilLqgHXgBVM?si=CrvhkGuisKiX2y3W
+
+User Demo (Jose’s Feedback): https://youtu.be/v9R-RLsbhaA
+
+What we did: Engineered a cross-platform mobile application transforming visual art into immersive auditory experiences through a sophisticated AI pipeline. Architected a three-stage workflow: (1) Mistral Navigator for vision analysis and contextual metadata extraction, (2) Suno AI for emotion-driven music generation mapped from visual elements, and (3) MongoDB caching layer for sub-500ms retrieval. Implemented WCAG AAA-compliant accessibility features including dual TTS systems (VoiceOver/TalkBack + Unreal Speech), adjustable speech parameters, haptic feedback, and screen reader integration with semantic focus management.
+
+Tech Stack: React Native, Expo, Overshoot, FastAPI, MongoDB Atlas, Mistral AI Navigator, Suno AI, Unreal Speech TTS, TypeScript, Python
 
 ## Get started
 
